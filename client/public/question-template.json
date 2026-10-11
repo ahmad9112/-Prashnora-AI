@@ -1,0 +1,15 @@
+[
+  {
+    "exam": "GATE",
+    "stage": "Computer Science",
+    "section": "Core CS",
+    "subject": "Computer Science",
+    "topic": "Data Structures",
+    "question": "Which data structure follows the LIFO principle?",
+    "options": ["Queue", "Stack", "Linked list", "Binary tree"],
+    "answer": 1,
+    "explanation": "A stack follows Last In, First Out (LIFO).",
+    "difficulty": "Easy",
+    "source": "Admin upload"
+  }
+]
