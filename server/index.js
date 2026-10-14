@@ -21,6 +21,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
+  'https://prashnora-ai.vercel.app',
 ];
 
 app.use(cors({
