@@ -13,6 +13,7 @@ const navItems = [
   { id: 'tests', label: 'Mock Tests', icon: '✓' },
 
   { id: 'planner', label: 'Study Planner', icon: '▤' },
+  { id: 'syllabus', label: 'Syllabus Tracker', icon: '📚' },
 
   { id: 'performance', label: 'Performance', icon: '↗' },
 
@@ -348,6 +349,12 @@ export default function App() {
   const [authChecking, setAuthChecking] = useState(Boolean(localStorage.getItem('prashnora_token')));
 
   const [active, setActive] = useState('dashboard');
+  const [syllabusExam, setSyllabusExam] = useState('UPSC CSE');
+  const [syllabusStage, setSyllabusStage] = useState('Prelims');
+  const [syllabusSubject, setSyllabusSubject] = useState('');
+  const [syllabusTopics, setSyllabusTopics] = useState([]);
+  const [syllabusProgress, setSyllabusProgress] = useState([]);
+  const [syllabusBusy, setSyllabusBusy] = useState(false);
 
   const [tasks, setTasks] = useState([]); const [mistakes, setMistakes] = useState([]); const [results, setResults] = useState([]);
 
@@ -373,10 +380,14 @@ export default function App() {
   const [examSearch, setExamSearch] = useState(''); const [examCategory, setExamCategory] = useState('All Exams'); const [selectedExam, setSelectedExam] = useState('UPSC CSE');
 
   const [questions, setQuestions] = useState([]); const [answers, setAnswers] = useState({});
-
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [markedQuestions, setMarkedQuestions] = useState([]);
+  const [testDraftLoaded, setTestDraftLoaded] = useState(false);
   const [testStage, setTestStage] = useState(''); const [testSubject, setTestSubject] = useState(''); const [testTopic, setTestTopic] = useState(''); const [testCount, setTestCount] = useState('10'); const [topicOptions, setTopicOptions] = useState([]); const [questionCount, setQuestionCount] = useState(0);
 
   const [adminExam, setAdminExam] = useState('GATE'); const [adminStage, setAdminStage] = useState('Computer Science'); const [adminSubject, setAdminSubject] = useState('Computer Science'); const [adminTopic, setAdminTopic] = useState('Data Structures'); const [adminCount, setAdminCount] = useState('20'); const [adminBusy, setAdminBusy] = useState(false); const [adminMessage, setAdminMessage] = useState(''); const [adminFile, setAdminFile] = useState(null); const [testResult, setTestResult] = useState(null); const [testReview, setTestReview] = useState([]); const [testBusy, setTestBusy] = useState(false); const [seconds, setSeconds] = useState(600); const [testStarted, setTestStarted] = useState(false);
+  const [aiWeakAnalysis, setAiWeakAnalysis] = useState('');
+  const [aiWeakBusy, setAiWeakBusy] = useState(false);
 
   const [mentorInput, setMentorInput] = useState(''); const [mentorMessages, setMentorMessages] = useState([{ role: 'assistant', content: 'Hi! I’m Prashnora Mentor. Ask me to explain a concept, plan a revision session, or help you learn from a mistake.' }]); const [mentorBusy, setMentorBusy] = useState(false);
 
@@ -406,6 +417,93 @@ export default function App() {
 
   }, [logout]);
 
+  useEffect(() => {
+    if (!token || !user) return;
+
+    const userKey = user.id || user._id || user.email;
+    const draftKey = `prashnora-test-draft-${userKey}`;
+
+    try {
+      const saved = localStorage.getItem(draftKey);
+
+      if (saved) {
+        const draft = JSON.parse(saved);
+
+        if (draft.testStarted && Array.isArray(draft.questions) && draft.questions.length > 0) {
+          console.log('RESTORING TEST DRAFT:', draft.questions?.length, draft.testStarted);
+          setQuestions(draft.questions);
+          setAnswers(draft.answers || {});
+          setCurrentQuestion(Math.min(
+            Math.max(0, Number(draft.currentQuestion) || 0),
+            draft.questions.length - 1
+          ));
+          setMarkedQuestions(draft.markedQuestions || []);
+          setSelectedExam(draft.selectedExam || 'UPSC CSE');
+          setTestStage(draft.testStage || '');
+          setTestSubject(draft.testSubject || '');
+          setTestTopic(draft.testTopic || '');
+          setTestCount(draft.testCount || '10');
+          setQuestionCount(draft.questions.length);
+          setSeconds(Math.max(0, Number(draft.seconds) || 0));
+          setTestStarted(true);
+          setTestResult(null);
+          setTestReview([]);
+          setActive('tests');
+          setNotice('Your previous test has been restored.');
+        }
+      }
+    } catch (err) {
+      console.error('Could not restore saved test:', err);
+    } finally {
+      setTestDraftLoaded(true);
+    }
+  }, [token, user]);
+
+  useEffect(() => {
+    if (!token || !user || !testDraftLoaded) return;
+
+    const userKey = user.id || user._id || user.email;
+    const draftKey = `prashnora-test-draft-${userKey}`;
+
+    try {
+      if (testStarted && questions.length > 0 && !testResult) {
+        localStorage.setItem(
+          draftKey,
+          JSON.stringify({
+            questions,
+            answers,
+            currentQuestion,
+            markedQuestions,
+            selectedExam,
+            testStage,
+            testSubject,
+            testTopic,
+            testCount,
+            seconds,
+            testStarted
+          })
+        );
+      }
+    } catch (err) {
+      console.error('Could not save test draft:', err);
+    }
+  }, [
+    token,
+    user,
+    testDraftLoaded,
+    testStarted,
+    testResult,
+    questions,
+    answers,
+    currentQuestion,
+    markedQuestions,
+    selectedExam,
+    testStage,
+    testSubject,
+    testTopic,
+    testCount,
+    seconds
+  ]);
   useEffect(() => {
 
     let cancelled = false;
@@ -763,10 +861,150 @@ export default function App() {
 
   const deleteMistake = async id => { await run(async () => { await api(`/mistakes/${id}`, { token, method: 'DELETE' }); setMistakes(old => old.filter(m => m.id !== id)); setNotice('Mistake removed.'); }); };
 
-  const startTest = async () => { await run(async () => { const params = new URLSearchParams({ exam: selectedExam, limit: testCount }); if (testStage) params.set('stage', testStage); if (testSubject) params.set('subject', testSubject); if (testTopic) params.set('topic', testTopic); const data = await api(`/tests/questions?${params.toString()}`, { token }); if (!data.questions?.length) throw new Error('No questions found for these filters yet. Ask an admin to import questions or generate an AI batch.'); setQuestions(data.questions); setQuestionCount(data.questions.length); setAnswers({}); setTestResult(null); setTestReview([]); setSeconds(Math.max(600, Number(testCount) * 60)); setTestStarted(true); setNotice(`${data.questions.length}-question ${selectedExam} practice test started.`); }); };
+  const startTest = async () => {
+    await run(async () => {
+      const params = new URLSearchParams({ exam: selectedExam, limit: testCount }); if (testStage) params.set('stage', testStage); if (testSubject) params.set('subject', testSubject); if (testTopic) params.set('topic', testTopic); const data = await api(`/tests/questions?${params.toString()}`, { token }); if (!data.questions?.length) throw new Error('No questions found for these filters yet. Ask an admin to import questions or generate an AI batch.'); setQuestions(data.questions); setQuestionCount(data.questions.length); setAnswers({}); setTestResult(null); setTestReview([]);
+      setCurrentQuestion(0);
+      setMarkedQuestions([]); setSeconds(Math.max(600, Number(testCount) * 60)); setTestStarted(true);
+      const draftKey = `prashnora-test-draft-${user.id || user._id || user.email}`;
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          questions: data.questions, answers: {}, currentQuestion: 0,
+          markedQuestions: [], selectedExam, testStage, testSubject, testTopic,
+          testCount, seconds: Math.max(600, Number(testCount) * 60), testStarted: true
+        }));
+      } catch (storageError) {
+        console.error('Could not save new test draft:', storageError);
+      }
+      setNotice(`${data.questions.length}-question ${selectedExam} practice test started.`);
+    });
+  };
 
-  const submitTest = async () => { if (testBusy || testResult || !questions.length) return; setTestBusy(true); try { const data = await api('/tests/submit', { token, method: 'POST', body: JSON.stringify({ exam: selectedExam, answers: questions.map(q => ({ questionId: q.id, selectedIndex: answers[q.id] ?? -1 })) }) }); setTestResult(data.result); setTestReview(data.review || []); setTestStarted(false); setNotice('Your result has been saved.'); const history = await api('/results', { token }); setResults(history.results || []); } catch (err) { setError(err.message); } finally { setTestBusy(false); } };
+  const loadSyllabus = async () => {
+    setSyllabusBusy(true);
+    setError('');
+    setNotice('');
 
+    const subjects = getSubjects(syllabusExam, syllabusStage);
+    const subject = syllabusSubject && subjects.includes(syllabusSubject)
+      ? syllabusSubject
+      : (subjects[0] || 'General Studies');
+    setSyllabusSubject(subject);
+
+    // Build a local syllabus immediately from the exam blueprint, so the page
+    // still displays topics if the optional syllabus GET endpoint is not ready.
+    const localTopics = getFallbackTopics(syllabusExam, subject);
+    setSyllabusTopics(localTopics);
+
+    try {
+      const data = await api(
+        `/syllabus?exam=${encodeURIComponent(syllabusExam)}&stage=${encodeURIComponent(syllabusStage)}&subject=${encodeURIComponent(subject)}`,
+        { token }
+      );
+      if (Array.isArray(data.topics) && data.topics.length) setSyllabusTopics(data.topics);
+      setSyllabusProgress(Array.isArray(data.progress) ? data.progress : []);
+    } catch (err) {
+      // Local blueprint remains usable; saving progress still requires the backend route.
+      setSyllabusProgress([]);
+      setNotice(`Showing built-in ${syllabusExam} topics. Saved progress will load when the syllabus API is available.`);
+    } finally {
+      setSyllabusBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token || !user || active !== 'syllabus') return;
+
+    loadSyllabus();
+  }, [token, user, active]);
+
+  const updateSyllabusProgress = async (topic, status) => {
+    setError('');
+    setNotice('');
+    const existing = syllabusProgress.find(item =>
+      item.topic === topic && item.exam === syllabusExam &&
+      (item.stage || 'General') === syllabusStage && item.subject === syllabusSubject
+    );
+    const previous = existing?.status || 'Not Started';
+    setSyllabusProgress(old => {
+      const filtered = old.filter(item => !(item.topic === topic && item.exam === syllabusExam &&
+        (item.stage || 'General') === syllabusStage && item.subject === syllabusSubject));
+      return [...filtered, {
+        ...(existing || {}), exam: syllabusExam, stage: syllabusStage,
+        subject: syllabusSubject, topic, status
+      }];
+    });
+
+    try {
+      await api('/syllabus/progress', {
+        token,
+        method: 'POST',
+        body: JSON.stringify({
+          exam: syllabusExam, stage: syllabusStage,
+          subject: syllabusSubject, topic, status
+        })
+      });
+      setNotice(`“${topic}” marked ${status.toLowerCase()}.`);
+    } catch (err) {
+      setSyllabusProgress(old => {
+        const filtered = old.filter(item => !(item.topic === topic && item.exam === syllabusExam &&
+          (item.stage || 'General') === syllabusStage && item.subject === syllabusSubject));
+        return existing ? [...filtered, existing] : filtered;
+      });
+      setError(`Could not save topic progress: ${err.message}. Check that POST /api/syllabus/progress exists in server/index.js.`);
+    }
+  };
+
+  const submitTest = async () => { if (testBusy || testResult || !questions.length) return; setTestBusy(true); try { const data = await api('/tests/submit', { token, method: 'POST', body: JSON.stringify({ exam: selectedExam, answers: questions.map(q => ({ questionId: q.id, selectedIndex: answers[q.id] ?? -1 })) }) }); setTestResult(data.result); setTestReview(data.review || []); setTestStarted(false); localStorage.removeItem(`prashnora-test-draft-${user.id || user._id || user.email}`); setNotice('Your result has been saved.'); const history = await api('/results', { token }); setResults(history.results || []); } catch (err) { setError(err.message); } finally { setTestBusy(false); } };
+  const generateWeakTopicAnalysis = async () => {
+    if (!testReview.length || aiWeakBusy) return;
+
+    setAiWeakBusy(true);
+    setAiWeakAnalysis('');
+    setError('');
+
+    const reviewSummary = testReview.map((q, index) => ({
+      questionNumber: index + 1,
+      topic: q.topic || q.subject || 'General Practice',
+      question: q.question,
+      selectedAnswer:
+        q.selectedIndex >= 0
+          ? q.options?.[q.selectedIndex]
+          : 'Not answered',
+      correctAnswer: q.options?.[q.answer],
+      correct: Boolean(q.correct)
+    }));
+
+    try {
+      const data = await api('/mentor', {
+        token,
+        method: 'POST',
+        body: JSON.stringify({
+          message: `You are an exam preparation mentor for ${selectedExam || 'UPSC CSE'}.
+
+Analyze this mock test review:
+${JSON.stringify(reviewSummary).slice(0, 1800)}
+
+Provide:
+1. Weakest topics.
+2. Why the student may be struggling.
+3. Three revision actions.
+4. A 3-day revision plan.
+5. Five concepts to revise first.
+
+Use only the supplied results. Keep the advice concise.`
+        })
+      });
+
+      setAiWeakAnalysis(
+        data.answer || 'The AI mentor returned no analysis. Please try again.'
+      );
+    } catch (err) {
+      setError(`AI analysis failed: ${err.message}`);
+    } finally {
+      setAiWeakBusy(false);
+    }
+  };
   const askMentor = async event => { event.preventDefault(); const message = mentorInput.trim(); if (!message || mentorBusy) return; setMentorInput(''); setMentorMessages(old => [...old, { role: 'user', content: message }]); setMentorBusy(true); try { const data = await api('/mentor', { token, method: 'POST', body: JSON.stringify({ message }) }); setMentorMessages(old => [...old, { role: 'assistant', content: data.answer, mode: data.mode }]); } catch (err) { setMentorMessages(old => [...old, { role: 'assistant', content: `I couldn't answer that just now: ${err.message}` }]); } finally { setMentorBusy(false); } };
 
   if (authChecking) return <div className="min-h-screen grid place-items-center bg-slate-50"><p className="font-semibold text-slate-500">Loading your study space…</p></div>;
@@ -1061,6 +1299,71 @@ export default function App() {
           <button disabled={taskBusy} className="rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:opacity-60 md:col-span-2 xl:col-span-3">{taskBusy ? 'Saving…' : '+ Add Study Task'}</button>
         </form><div className="mt-6 grid gap-4 sm:grid-cols-3"><Stat label="Total tasks" value={tasks.length} /><Stat label="Completed" value={completed} tone="green" /><Stat label="Progress" value={`${progress}%`} tone="amber" /></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} /></div><div className="mt-5 space-y-3">{tasks.map(task => <div key={task.id} className={`flex flex-wrap items-center gap-3 rounded-xl border p-4 ${task.completed ? 'border-emerald-200 bg-emerald-50/50' : 'border-slate-200'}`}><input type="checkbox" checked={Boolean(task.completed)} onChange={() => toggleTask(task)} className="h-5 w-5 accent-blue-700" /><div className="min-w-0 flex-1"><p className={`font-bold ${task.completed ? 'text-slate-400 line-through' : ''}`}>{task.task}</p><p className="mt-1 text-sm text-slate-500">{task.exam ? `${task.exam} · ` : ''}{task.subject} · {task.duration} minutes{task.topic ? ` · ${task.topic}` : ''}{task.dueDate ? ` · Due ${new Date(task.dueDate).toLocaleDateString()}` : ''}</p></div><button onClick={() => deleteTask(task.id)} className="rounded-lg px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">Remove</button></div>)}{!tasks.length && <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No study tasks yet. Add your first task above.</p>}</div></section>}
 
+      {active === 'syllabus' && <section className={card}>
+        <SectionTitle eyebrow="TRACK YOUR PREPARATION" title="Exam Syllabus Tracker" description="Choose an exam, paper and subject, then track each topic as you study." />
+        <div className="grid gap-4 md:grid-cols-3">
+          <label className="text-sm font-semibold">Exam
+            <select className="field mt-2" value={syllabusExam} onChange={e => {
+              const exam = e.target.value;
+              const stage = getStages(exam)[0] || 'General';
+              const subject = getSubjects(exam, stage)[0] || '';
+              setSyllabusExam(exam); setSyllabusStage(stage); setSyllabusSubject(subject);
+              setSyllabusTopics([]); setSyllabusProgress([]);
+            }}>
+              {allExams.map(exam => <option key={exam.name} value={exam.name}>{exam.name}</option>)}
+            </select>
+          </label>
+          <label className="text-sm font-semibold">Stage / Paper
+            <select className="field mt-2" value={syllabusStage} onChange={e => {
+              const stage = e.target.value;
+              setSyllabusStage(stage);
+              setSyllabusSubject(getSubjects(syllabusExam, stage)[0] || '');
+              setSyllabusTopics([]); setSyllabusProgress([]);
+            }}>
+              {getStages(syllabusExam).map(stage => <option key={stage} value={stage}>{stage}</option>)}
+            </select>
+          </label>
+          <label className="text-sm font-semibold">Subject
+            <select className="field mt-2" value={syllabusSubject} onChange={e => {
+              setSyllabusSubject(e.target.value); setSyllabusTopics([]); setSyllabusProgress([]);
+            }}>
+              {getSubjects(syllabusExam, syllabusStage).map(subject => <option key={subject} value={subject}>{subject}</option>)}
+            </select>
+          </label>
+        </div>
+        <button type="button" onClick={loadSyllabus} disabled={syllabusBusy} className="mt-4 rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:opacity-60">
+          {syllabusBusy ? 'Loading syllabus…' : 'Load Syllabus Topics'}
+        </button>
+
+        {(() => {
+          const topicNames = syllabusTopics.map(item => typeof item === 'string' ? item : item.topic || item.name || item.title).filter(Boolean);
+          const getStatus = topic => syllabusProgress.find(item => item.topic === topic && item.exam === syllabusExam && (item.stage || 'General') === syllabusStage && item.subject === syllabusSubject)?.status || 'Not Started';
+          const done = topicNames.filter(topic => getStatus(topic) === 'Completed').length;
+          const percent = topicNames.length ? Math.round(done / topicNames.length * 100) : 0;
+          return <>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <Stat label="Total topics" value={topicNames.length} />
+              <Stat label="Completed" value={done} tone="green" />
+              <Stat label="Syllabus progress" value={`${percent}%`} tone="violet" />
+            </div>
+            <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-600 transition-all" style={{ width: `${percent}%` }} /></div>
+            <div className="mt-5 space-y-3">
+              {topicNames.map(topic => {
+                const status = getStatus(topic);
+                return <article key={topic} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-4">
+                  <div className="min-w-0 flex-1"><p className="font-bold">{topic}</p><p className="mt-1 text-xs text-slate-500">{syllabusSubject} · {syllabusStage}</p></div>
+                  <select aria-label={`Status for ${topic}`} className="field sm:max-w-48" value={status} onChange={e => updateSyllabusProgress(topic, e.target.value)}>
+                    {['Not Started', 'In Progress', 'Completed'].map(value => <option key={value} value={value}>{value}</option>)}
+                  </select>
+                </article>;
+              })}
+              {!topicNames.length && <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">Select an exam, stage and subject, then click “Load Syllabus Topics”.</p>}
+            </div>
+          </>;
+        })()}
+        <p className="mt-4 text-xs text-slate-400">Topic lists come from the syllabus blueprint in this app. Progress is saved to your account only when the backend syllabus progress endpoint is configured.</p>
+      </section>}
+
       {active === 'mistakes' && <section className={card}><SectionTitle eyebrow="UNDERSTAND YOUR ERRORS" title="Mistake DNA" description="Record errors and identify topics that need more practice." /><form onSubmit={addMistake}><div className="grid gap-3 md:grid-cols-2"><input className="field" value={mistakeQuestion} onChange={e => setMistakeQuestion(e.target.value)} placeholder="Question or mistake (e.g. confused two articles)" required /><input className="field" value={mistakeTopic} onChange={e => setMistakeTopic(e.target.value)} placeholder="Topic (e.g. Fundamental Rights)" required /></div><div className="mt-3 flex flex-col gap-3 sm:flex-row"><select className="field sm:max-w-xs" value={mistakeType} onChange={e => setMistakeType(e.target.value)}>{mistakeTypes.map(t => <option key={t}>{t}</option>)}</select><button disabled={mistakeBusy} className="rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:opacity-60">{mistakeBusy ? 'Saving…' : '+ Add Mistake'}</button></div></form><div className="mt-6 grid gap-4 sm:grid-cols-2"><Stat label="Mistakes recorded" value={mistakes.length} /><Stat label="Topics to review" value={uniqueTopics} tone="amber" /></div><div className="mt-5 space-y-3">{mistakes.map(m => <article key={m.id} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 p-4"><div className="min-w-0 flex-1"><p className="font-bold">{m.topic}</p><p className="mt-1 break-words text-sm text-slate-600">{m.question}</p><span className="mt-2 inline-block rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{m.type}</span></div><button onClick={() => deleteMistake(m.id)} className="rounded-lg px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50">Remove</button></article>)}{!mistakes.length && <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">No mistakes recorded yet. Add your first mistake above.</p>}</div></section>}
 
       {active === 'tests' && <section className={card}><SectionTitle eyebrow="PERSONALISED PRACTICE ENGINE" title="Mock Test Centre" description="Choose an exam, stage, subject and topic. Tests draw only from the matching question bank." /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -1081,9 +1384,355 @@ export default function App() {
 
       </div><div className="mt-4 flex flex-wrap items-center gap-3"><button onClick={startTest} disabled={testStarted || testBusy} className="rounded-xl bg-blue-700 px-5 py-3 font-bold text-white hover:bg-blue-800 disabled:opacity-50">{testStarted ? 'Test in progress' : `Start ${testCount}-question test →`}</button>{testStarted && <span className={`rounded-xl px-4 py-3 font-extrabold ${seconds < 60 ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>⏱ {formattedTime}</span>}<span className="text-sm text-slate-500">Questions available depend on the selected exam and filters.</span></div>
 
-        {testStarted && <><div className="mt-6 space-y-4">{questions.map((q, i) => <article key={q.id} className="rounded-2xl border border-slate-200 p-5"><p className="text-xs font-bold uppercase tracking-widest text-blue-700">Question {i + 1} of {questions.length} · {q.subject || q.topic} · {q.topic}</p><h3 className="mt-3 font-bold leading-6">{q.question}</h3><div className="mt-4 grid gap-2 sm:grid-cols-2">{q.options.map((option, idx) => <label key={`${q.id}-${idx}`} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm ${answers[q.id] === idx ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}><input type="radio" name={q.id} checked={answers[q.id] === idx} onChange={() => setAnswers(old => ({ ...old, [q.id]: idx }))} className="accent-blue-700" />{option}</label>)}</div></article>)}</div><button onClick={submitTest} disabled={testBusy} className="mt-5 rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white hover:bg-emerald-800 disabled:opacity-50">{testBusy ? 'Submitting…' : 'Submit test'}</button></>}
 
-        {testResult && <div className="mt-6"><div className="rounded-2xl bg-blue-50 p-6"><p className="text-sm font-semibold text-blue-700">Test submitted · {testResult.exam}</p><p className="mt-2 text-4xl font-black text-slate-900">{testResult.score}%</p><p className="mt-2 text-sm text-slate-600">{testResult.correct} correct out of {testResult.total}. Result saved to your account.</p><button onClick={startTest} className="mt-4 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white">Try again</button></div><h3 className="mt-6 text-lg font-extrabold">Answer review</h3><div className="mt-3 space-y-3">{testReview.map((q, i) => <div key={q.id} className={`rounded-xl border p-4 ${q.correct ? 'border-emerald-200' : 'border-red-200'}`}><p className="font-bold">{i + 1}. {q.question}</p><p className="mt-2 text-sm">Your answer: {q.selectedIndex >= 0 ? q.options[q.selectedIndex] : 'Not answered'}</p><p className="mt-1 text-sm font-semibold text-emerald-700">Correct answer: {q.options[q.answer]}</p><p className="mt-2 text-sm text-slate-500">{q.explanation}</p></div>)}</div></div>}
+        {testStarted && (
+          <div className="mt-6">
+            <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="font-bold text-slate-800">Question Palette</p>
+                <p className="text-sm text-slate-500">
+                  Answered: {Object.keys(answers).filter(id => answers[id] !== undefined).length}
+                  {" / "}{questions.length}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10">
+                {questions.map((q, i) => {
+                  const answered = answers[q.id] !== undefined;
+                  const marked = markedQuestions.includes(q.id);
+
+                  return (
+                    <button
+                      key={q.id}
+                      type="button"
+                      onClick={() => setCurrentQuestion(i)}
+                      className={`relative h-10 rounded-lg border text-sm font-bold ${currentQuestion === i
+                        ? 'border-blue-700 bg-blue-700 text-white'
+                        : marked
+                          ? 'border-amber-400 bg-amber-100 text-amber-900'
+                          : answered
+                            ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                            : 'border-slate-200 bg-white text-slate-600'
+                        }`}
+                    >
+                      {i + 1}
+                      {marked && <span className="absolute -right-1 -top-1">★</span>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
+                <span>⬜ Not answered</span>
+                <span>🟩 Answered</span>
+                <span>🟨 Marked for review</span>
+              </div>
+            </div>
+
+            {questions[currentQuestion] && (() => {
+              const q = questions[currentQuestion];
+              const isMarked = markedQuestions.includes(q.id);
+
+              return (
+                <article className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-bold uppercase tracking-widest text-blue-700">
+                      Question {currentQuestion + 1} of {questions.length}
+                    </p>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                      {q.subject || q.topic || 'Practice'}
+                    </span>
+                  </div>
+
+                  <h3 className="mt-4 text-lg font-bold leading-7 text-slate-900">
+                    {q.question}
+                  </h3>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    {q.options.map((option, idx) => (
+                      <label
+                        key={`${q.id}-${idx}`}
+                        className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-sm transition ${answers[q.id] === idx
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-slate-200 hover:bg-slate-50'
+                          }`}
+                      >
+                        <input
+                          type="radio"
+                          name={q.id}
+                          checked={answers[q.id] === idx}
+                          onChange={() =>
+                            setAnswers(old => ({ ...old, [q.id]: idx }))
+                          }
+                          className="mt-1 accent-blue-700"
+                        />
+                        <span>{option}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="mt-6 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={currentQuestion === 0}
+                      onClick={() => setCurrentQuestion(i => i - 1)}
+                      className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold disabled:opacity-40"
+                    >
+                      ← Previous
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMarkedQuestions(old =>
+                          isMarked
+                            ? old.filter(id => id !== q.id)
+                            : [...old, q.id]
+                        )
+                      }
+                      className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-800"
+                    >
+                      {isMarked ? '★ Remove Review Mark' : '☆ Mark for Review'}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={currentQuestion === questions.length - 1}
+                      onClick={() => setCurrentQuestion(i => i + 1)}
+                      className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40"
+                    >
+                      Next →
+                    </button>
+                  </div>
+                </article>
+              );
+            })()}
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-slate-500">
+                {questions.filter(q => answers[q.id] === undefined).length} unanswered
+                {" · "}{markedQuestions.length} marked for review
+              </p>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Are you sure you want to submit this test?')) {
+                    submitTest();
+                  }
+                }}
+                disabled={testBusy}
+                className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                {testBusy ? 'Submitting…' : 'Submit Test'}
+              </button>
+            </div>
+          </div>
+        )}
+
+
+        {testResult && <div className="mt-6"><div className="rounded-2xl bg-blue-50 p-6"><p className="text-sm font-semibold text-blue-700">Test submitted · {testResult.exam}</p><p className="mt-2 text-4xl font-black text-slate-900">{testResult.score}%</p>
+          <p className="mt-2 text-sm text-slate-600">
+            {testResult.correct} correct out of {testResult.total}. Result saved to your account.
+          </p>
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+              <p className="text-sm text-emerald-700">Correct</p>
+              <p className="mt-1 text-2xl font-extrabold text-emerald-800">
+                {testResult.correct}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+              <p className="text-sm text-red-700">Incorrect</p>
+              <p className="mt-1 text-2xl font-extrabold text-red-800">
+                {testReview.filter(q => q.selectedIndex >= 0 && !q.correct).length}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-sm text-slate-600">Unanswered</p>
+              <p className="mt-1 text-2xl font-extrabold text-slate-800">
+                {testReview.filter(q => q.selectedIndex < 0).length}
+              </p>
+            </div>
+          </div>
+          <button onClick={startTest} className="mt-4 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white">Try again</button></div>
+          <div className="mt-5 rounded-xl border border-blue-200 bg-white p-5">
+            <h3 className="text-lg font-extrabold text-slate-900">
+              Performance Insights
+            </h3>
+
+            <p className="mt-3 text-sm text-slate-600">
+              Accuracy:{" "}
+              <span className="font-bold text-blue-700">
+                {testResult.total > 0
+                  ? Math.round(
+                    (testResult.correct / testResult.total) * 100
+                  )
+                  : 0}%
+              </span>
+            </p>
+
+            <p className="mt-2 text-sm text-slate-600">
+              {testResult.score >= 70
+                ? "Great work! Keep practising to maintain your performance."
+                : testResult.score >= 40
+                  ? "Good attempt. Review incorrect answers and practise weak topics."
+                  : "Focus on understanding the concepts and revise the explanations before your next test."}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setActive("performance")}
+              className="mt-4 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-800"
+            >
+              View Performance Dashboard →
+            </button>
+          </div>
+
+          {/* Weak Topics Analysis */}
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+            <h3 className="text-lg font-extrabold text-slate-900">
+              Weak Topics Analysis
+            </h3>
+
+            <p className="mt-1 text-sm text-slate-600">
+              Revise topics where you answered incorrectly or left questions unanswered.
+              <button
+                type="button"
+                onClick={generateWeakTopicAnalysis}
+                disabled={aiWeakBusy || !testReview.length}
+                className="mt-4 rounded-xl bg-blue-700 px-5 py-3 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50"
+              >
+                {aiWeakBusy ? 'Analyzing your results…' : '✨ Generate AI Revision Plan'}
+              </button>
+
+              {aiWeakAnalysis && (
+                <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-5 text-sm leading-7 text-slate-700">
+                  <h4 className="mb-4 text-lg font-extrabold text-blue-800">
+                    ✨ Your Personalized AI Analysis
+                  </h4>
+                  <div className="whitespace-pre-wrap break-words">
+                    {aiWeakAnalysis
+                      .replace(/^### /gm, '')
+                      .replace(/^## /gm, '')
+                      .replace(/^# /gm, '')
+                      .replace(/\*\*(.*?)\*\*/g, '$1')
+                      .replace(/^\s*\*\s+/gm, '• ')
+                      .replace(/^\|[-:\s|]+\|$/gm, '')}
+                  </div>
+                </div>
+              )}
+            </p>
+
+            {Object.entries(
+              testReview.reduce((groups, q) => {
+                const topic = q.topic || q.subject || "General Practice";
+
+                if (!groups[topic]) {
+                  groups[topic] = { wrong: 0, unanswered: 0 };
+                }
+
+                if (q.selectedIndex < 0) {
+                  groups[topic].unanswered += 1;
+                } else if (!q.correct) {
+                  groups[topic].wrong += 1;
+                }
+
+                return groups;
+              }, {})
+            ).filter(([, stats]) => stats.wrong + stats.unanswered > 0).length > 0 ? (
+              <div className="mt-4 space-y-3">
+                {Object.entries(
+                  testReview.reduce((groups, q) => {
+                    const topic = q.topic || q.subject || "General Practice";
+
+                    if (!groups[topic]) {
+                      groups[topic] = { wrong: 0, unanswered: 0 };
+                    }
+
+                    if (q.selectedIndex < 0) {
+                      groups[topic].unanswered += 1;
+                    } else if (!q.correct) {
+                      groups[topic].wrong += 1;
+                    }
+
+                    return groups;
+                  }, {})
+                )
+                  .filter(([, stats]) => stats.wrong + stats.unanswered > 0)
+                  .map(([topic, stats]) => (
+                    <div
+                      key={topic}
+                      className="rounded-xl border border-amber-200 bg-white p-4"
+                    >
+                      <p className="font-bold text-slate-800">{topic}</p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Incorrect: {stats.wrong} · Unanswered: {stats.unanswered}
+                      </p>
+                      <div className="mt-2 text-sm font-semibold text-amber-800">
+                        <p>Suggested action: Revise this topic and practise more questions.</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const exam = selectedExam || "UPSC CSE";
+                              const topicName = String(topic || "").trim();
+                              const subjectMap = {
+                                Geography: "General Studies Paper I",
+                                "Fundamental Rights": "General Studies Paper I",
+                                Constitution: "General Studies Paper I",
+                                Polity: "General Studies Paper I",
+                              };
+                              const subject =
+                                subjectMap[topicName] ||
+                                getSubjects(exam).find(s =>
+                                  getFallbackTopics(exam, s).includes(topicName)
+                                ) ||
+                                getSubjects(exam)[0] ||
+                                "";
+                              setTaskExam(exam);
+                              setTaskText(`Revise ${topicName}`);
+                              setTaskSubject(subject);
+                              setTaskTopic(
+                                getFallbackTopics(exam, subject).includes(topicName)
+                                  ? topicName
+                                  : ""
+                              );
+                              setTaskDuration("45");
+                              setActive("planner");
+                            }}
+                            className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800"
+                          >
+                            Add to Study Planner →
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMentorInput(
+                                `I am preparing for ${selectedExam || "UPSC CSE"}. Explain "${topic}" in simple language. My weak-topic analysis shows ${stats.wrong} incorrect and ${stats.unanswered} unanswered questions. Explain the key concepts, common mistakes, and give me 5 practice MCQs with answers.`
+                              );
+                              setActive("mentor");
+                            }}
+                            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-800"
+                          >
+                            Ask AI Mentor →
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-xl bg-white p-4 text-sm text-emerald-700">
+                Great work! No weak topics identified in this test.
+              </p>
+            )}
+          </div>
+
+          <h3 className="mt-6 text-lg font-extrabold">Answer review</h3><div className="mt-3 space-y-3">{testReview.map((q, i) => <div key={q.id} className={`rounded-xl border p-4 ${q.correct ? 'border-emerald-200' : 'border-red-200'}`}><p className="font-bold">{i + 1}. {q.question}</p><p className="mt-2 text-sm">Your answer: {q.selectedIndex >= 0 ? q.options[q.selectedIndex] : 'Not answered'}</p><p className="mt-1 text-sm font-semibold text-emerald-700">Correct answer: {q.options[q.answer]}</p><p className="mt-2 text-sm text-slate-500">{q.explanation}</p></div>)}</div></div>}
 
         {!testStarted && !testResult && <div className="mt-6 rounded-2xl border border-dashed border-slate-300 p-8 text-center"><span className="text-3xl">🧠</span><p className="mt-3 font-bold">Practice by exam, subject or topic</p><p className="mt-1 text-sm text-slate-500">If a topic has no saved questions yet, generate a batch from Question Bank Admin or import structured questions.</p></div>}
 
@@ -1095,7 +1744,43 @@ export default function App() {
 
       ))}</select></label></div><button disabled={adminBusy} className="rounded-xl bg-blue-700 px-5 py-3 font-bold text-white disabled:opacity-50">{adminBusy ? 'Generating…' : 'Generate and save batch'}</button></form><div className="my-6 border-t border-slate-200" /><form onSubmit={async e => { e.preventDefault(); if (!adminFile) return setAdminMessage('Choose a JSON, CSV or text-based PDF file.'); setAdminBusy(true); setAdminMessage('Importing file…'); try { const form = new FormData(); form.append('file', adminFile); form.append('exam', adminExam); form.append('stage', adminStage); form.append('subject', adminSubject); form.append('topic', adminTopic); const response = await fetch(`${API_URL}/admin/import`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form }); const d = await response.json(); if (!response.ok || d.success === false) throw new Error(d.message || 'Import failed'); setAdminMessage(`Import complete. Inserted: ${d.inserted || 0}, duplicates: ${d.duplicates || 0}, invalid: ${d.invalid || 0}. ${d.extractedTextPreview ? `PDF preview: ${d.extractedTextPreview.slice(0, 300)}` : ''}`); } catch (err) { setAdminMessage(err.message); } finally { setAdminBusy(false); } }} className="space-y-3"><h3 className="text-lg font-bold">Import questions from a file</h3><p className="text-sm text-slate-500">JSON and CSV can be imported as structured questions. Text-based PDFs can be extracted for preview; convert/verify them into the template before publishing. Scanned PDFs need OCR first.</p><input className="field" type="file" accept=".json,.csv,.pdf" onChange={e => setAdminFile(e.target.files?.[0] || null)} required /><button disabled={adminBusy} className="rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700 disabled:opacity-50">Upload / import</button><a className="ml-3 text-sm font-semibold text-blue-700 underline" href="/question-template.json" download>Download JSON template</a></form>{adminMessage && <p className="mt-4 whitespace-pre-wrap rounded-xl bg-blue-50 p-4 text-sm text-blue-800">{adminMessage}</p>}</section>}
 
-      {active === 'performance' && <section className={card}><SectionTitle eyebrow="YOUR PROGRESS" title="Performance overview" description="A summary of your saved study activity and mock test attempts." /><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Tests attempted" value={results.length} /><Stat label="Average score" value={`${averageScore}%`} tone="green" /><Stat label="Tasks completed" value={completed} tone="violet" /><Stat label="Mistakes reviewed" value={mistakes.length} tone="amber" /></div><h3 className="mt-8 text-lg font-extrabold">Test history</h3><div className="mt-3 space-y-3">{results.map(r => <div key={r._id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4"><div><p className="font-bold">{r.exam}</p><p className="mt-1 text-xs text-slate-500">{new Date(r.createdAt).toLocaleString()} · {r.correct}/{r.total} correct</p></div><span className={`rounded-xl px-4 py-2 font-extrabold ${r.score >= 70 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{r.score}%</span></div>)}{!results.length && <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">Complete your first mock test to see your results here.</p>}</div></section>}
+      {active === 'performance' && <section className={card}><SectionTitle eyebrow="YOUR PROGRESS" title="Performance overview" description="A summary of your saved study activity and mock test attempts." /><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Tests attempted" value={results.length} /><Stat label="Average score" value={`${averageScore}%`} tone="green" /><Stat label="Tasks completed" value={completed} tone="violet" /><Stat label="Mistakes reviewed" value={mistakes.length} tone="amber" /></div>
+        <h3 className="mt-8 text-lg font-extrabold">
+          Recent Test Performance
+        </h3>
+
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
+          {results.length > 0 ? (
+            <div className="space-y-4">
+              {results.slice(0, 7).reverse().map((r, i) => (
+                <div key={r._id || i}>
+                  <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                    <span className="font-medium text-slate-700">
+                      {r.exam} · {new Date(r.createdAt).toLocaleDateString()}
+                    </span>
+                    <span className="font-bold text-blue-700">
+                      {r.score}%
+                    </span>
+                  </div>
+
+                  <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-blue-600 transition-all"
+                      style={{
+                        width: `${Math.max(0, Math.min(100, Number(r.score) || 0))}%`
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">
+              Complete a mock test to see your performance chart.
+            </p>
+          )}
+        </div>
+        <h3 className="mt-8 text-lg font-extrabold">Test history</h3><div className="mt-3 space-y-3">{results.map(r => <div key={r._id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4"><div><p className="font-bold">{r.exam}</p><p className="mt-1 text-xs text-slate-500">{new Date(r.createdAt).toLocaleString()} · {r.correct}/{r.total} correct</p></div><span className={`rounded-xl px-4 py-2 font-extrabold ${r.score >= 70 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{r.score}%</span></div>)}{!results.length && <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">Complete your first mock test to see your results here.</p>}</div></section>}
 
       {active === 'mentor' && <section className={card}><SectionTitle eyebrow="ASK · UNDERSTAND · IMPROVE" title="Prashnora AI Mentor" description="Ask for concept explanations, revision plans, or help understanding mistakes." /><div className="mb-4 flex flex-wrap gap-2">{['Explain Fundamental Rights simply', 'Make a 3-hour study plan', 'Explain percentage calculation'].map(prompt => <button key={prompt} onClick={() => setMentorInput(prompt)} className="rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100">{prompt}</button>)}</div><div className="max-h-[52vh] min-h-64 space-y-4 overflow-y-auto rounded-2xl bg-slate-50 p-4">{mentorMessages.map((m, i) => <div key={`${i}-${m.role}`} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[90%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 ${m.role === 'user' ? 'bg-blue-700 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>{m.content}{m.mode === 'built-in' && <p className="mt-3 border-t border-slate-100 pt-2 text-[10px] text-slate-400">Built-in guidance mode</p>}</div></div>)}{mentorBusy && <p className="text-sm text-slate-400">Mentor is thinking…</p>}</div><form onSubmit={askMentor} className="mt-4 flex flex-col gap-3 sm:flex-row"><textarea className="field min-h-14 flex-1 resize-y" rows="2" value={mentorInput} onChange={e => setMentorInput(e.target.value)} placeholder="Ask a question or describe a topic…" maxLength={3000} required /><button disabled={mentorBusy} className="rounded-xl bg-blue-700 px-6 py-3 font-bold text-white hover:bg-blue-800 disabled:opacity-50">{mentorBusy ? 'Thinking…' : 'Ask mentor ↑'}</button></form><p className="mt-3 text-xs text-slate-400">AI responses can be incorrect. Verify important exam facts against trusted sources.</p></section>}
 

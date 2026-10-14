@@ -12,6 +12,7 @@ const User = require('./models/User');
 const StudyTask = require('./models/StudyTask');
 const Mistake = require('./models/Mistake');
 const TestResult = require('./models/TestResult');
+const SyllabusProgress = require('./models/SyllabusProgress');
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
@@ -379,6 +380,145 @@ app.post('/api/mistakes', auth, async (req, res) => {
 app.delete('/api/mistakes/:id', auth, async (req, res) => {
   try { const mistake = await Mistake.findOneAndDelete({ _id: req.params.id, userId: req.user.sub }); if (!mistake) return res.status(404).json({ success: false, message: 'Mistake not found.' }); res.json({ success: true }); }
   catch { res.status(400).json({ success: false, message: 'Unable to delete mistake.' }); }
+});
+
+app.get('/api/syllabus/progress', auth, async (req, res) => {
+  try {
+    const { exam } = req.query;
+
+    const filter = { userId: req.user.sub };
+    if (exam) filter.exam = exam;
+
+    const progress = await SyllabusProgress.find(filter)
+      .sort({ subject: 1, topic: 1 });
+
+    res.json({
+      success: true,
+      count: progress.length,
+      progress
+    });
+  } catch (error) {
+    console.error('Syllabus fetch error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch syllabus progress.'
+    });
+  }
+});
+
+app.get('/api/syllabus', auth, async (req, res) => {
+  try {
+    const { exam, stage, subject } = req.query;
+
+    if (!exam || !stage || !subject) {
+      return res.status(400).json({
+        success: false,
+        message: 'Exam, stage and subject are required.'
+      });
+    }
+
+    const blueprint = {
+      'UPSC CSE': {
+        Prelims: {
+          'General Studies Paper I': [
+            'History', 'Ancient India', 'Medieval India',
+            'Modern India', 'Art and Culture', 'Geography',
+            'Indian Geography', 'World Geography',
+            'Indian Polity', 'Constitution', 'Fundamental Rights',
+            'Parliament', 'Judiciary', 'Governance',
+            'Indian Economy', 'Budget', 'Environment and Ecology',
+            'Biodiversity', 'Climate Change',
+            'Science and Technology', 'Current Affairs'
+          ],
+          'CSAT (Paper II)': [
+            'Comprehension', 'Logical Reasoning',
+            'Analytical Ability', 'Basic Numeracy',
+            'Data Interpretation', 'Decision Making'
+          ]
+        }
+      }
+    };
+
+    const topics =
+      blueprint[exam]?.[stage]?.[subject] || [];
+
+    const progress = await SyllabusProgress.find({
+      userId: req.user.sub,
+      exam,
+      stage,
+      subject
+    });
+
+    res.json({ success: true, topics, progress });
+  } catch (error) {
+    console.error('Syllabus load error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load syllabus.'
+    });
+  }
+});
+
+
+app.post('/api/syllabus/progress', auth, async (req, res) => {
+  try {
+    const exam = String(req.body.exam || '').trim();
+    const stage = String(req.body.stage || 'General').trim();
+    const subject = String(req.body.subject || '').trim();
+    const topic = String(req.body.topic || '').trim();
+    const status = req.body.status || 'Not Started';
+
+    if (!exam || !subject || !topic) {
+      return res.status(400).json({
+        success: false,
+        message: 'Exam, subject and topic are required.'
+      });
+    }
+
+    if (!['Not Started', 'In Progress', 'Completed'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid syllabus status.'
+      });
+    }
+
+    const progress = await SyllabusProgress.findOneAndUpdate(
+      {
+        userId: req.user.sub,
+        exam,
+        stage,
+        subject,
+        topic
+      },
+      {
+        $set: {
+          status,
+          completedAt: status === 'Completed' ? new Date() : null
+        },
+        $setOnInsert: {
+          userId: req.user.sub,
+          exam,
+          stage,
+          subject,
+          topic
+        }
+      },
+      {
+        new: true,
+        upsert: true,
+        runValidators: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    res.json({ success: true, progress });
+  } catch (error) {
+    console.error('Syllabus save error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to save syllabus progress.'
+    });
+  }
 });
 
 const sampleQuestionBank = [
@@ -789,8 +929,8 @@ Exam date: ${validatedExamDate || 'Not provided'}
 
 STUDENT'S RECORDED WEAK TOPICS
 ${weakTopics.length
-  ? JSON.stringify(weakTopics)
-  : 'No recorded weak topics. Do not claim any topic is a proven weakness.'}
+        ? JSON.stringify(weakTopics)
+        : 'No recorded weak topics. Do not claim any topic is a proven weakness.'}
 
 RULES
 1. Use relevant subjects and topics for the selected exam.
