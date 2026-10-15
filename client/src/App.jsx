@@ -955,7 +955,101 @@ export default function App() {
     }
   };
 
-  const submitTest = async () => { if (testBusy || testResult || !questions.length) return; setTestBusy(true); try { const data = await api('/tests/submit', { token, method: 'POST', body: JSON.stringify({ exam: selectedExam, answers: questions.map(q => ({ questionId: q.id, selectedIndex: answers[q.id] ?? -1 })) }) }); setTestResult(data.result); setTestReview(data.review || []); setTestStarted(false); localStorage.removeItem(`prashnora-test-draft-${user.id || user._id || user.email}`); setNotice('Your result has been saved.'); const history = await api('/results', { token }); setResults(history.results || []); } catch (err) { setError(err.message); } finally { setTestBusy(false); } };
+
+  const submitTest = async () => {
+    if (testBusy || testResult || !questions.length) return;
+
+    setTestBusy(true);
+
+    try {
+      const data = await api('/tests/submit', {
+        token,
+        method: 'POST',
+        body: JSON.stringify({
+          exam: selectedExam,
+          answers: questions.map(q => ({
+            questionId: q.id,
+            selectedIndex: answers[q.id] ?? -1
+          }))
+        })
+      });
+
+      const review = data.review || [];
+
+      setTestResult(data.result);
+      setTestReview(review);
+      setTestStarted(false);
+
+      localStorage.removeItem(
+        `prashnora-test-draft-${user.id || user._id || user.email}`
+      );
+
+      // Automatically save incorrect and unanswered questions to Mistake DNA.
+      const wrongQuestions = review.filter(q => !q.correct);
+
+      let savedMistakes = 0;
+
+      for (const q of wrongQuestions) {
+        const topic = String(
+          q.topic || q.subject || 'General Practice'
+        ).trim();
+
+        const question = String(
+          q.question || 'Question from mock test'
+        ).trim();
+
+        const alreadyExists = mistakes.some(
+          m =>
+            String(m.topic || '').trim().toLowerCase() === topic.toLowerCase() &&
+            String(m.question || '').trim().toLowerCase() === question.toLowerCase()
+        );
+
+        if (alreadyExists) continue;
+
+        try {
+          const mistakeData = await api('/mistakes', {
+            token,
+            method: 'POST',
+            body: JSON.stringify({
+              question,
+              topic,
+              type: q.selectedIndex < 0
+                ? 'Time Pressure'
+                : 'Concept Gap'
+            })
+          });
+
+          setMistakes(old => [
+            {
+              ...mistakeData.mistake,
+              id: mistakeData.mistake._id || mistakeData.mistake.id
+            },
+            ...old
+          ]);
+
+          savedMistakes++;
+        } catch (mistakeError) {
+          console.error(
+            'Could not save mock test mistake:',
+            mistakeError
+          );
+        }
+      }
+
+      setNotice(
+        `Result saved. ${savedMistakes} new mistake(s) added to Mistake DNA.`
+      );
+
+      const history = await api('/results', { token });
+      setResults(history.results || []);
+
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTestBusy(false);
+    }
+  };
+
   const generateWeakTopicAnalysis = async () => {
     if (!testReview.length || aiWeakBusy) return;
 
@@ -1033,7 +1127,29 @@ Use only the supplied results. Keep the advice concise.`
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Stat label="Available exams" value={`${allExams.length}`} detail="Across 6 categories" /><Stat label="Study tasks" value={tasks.length} detail={`${completed} completed`} tone="green" /><Stat label="Mistakes tracked" value={mistakes.length} detail={`${uniqueTopics} topics to review`} tone="amber" /><Stat label="Average test score" value={`${averageScore}%`} detail={`${results.length} saved tests`} tone="violet" /></section>
 
-        <div className="mt-6 grid gap-6 xl:grid-cols-2"><section className={card}><SectionTitle eyebrow="NEXT ACTION" title="Today's study plan" description="Keep the next step small and achievable." action={<button onClick={() => setActive('planner')} className="text-sm font-bold text-blue-700">Open planner →</button>} />{tasks.filter(t => !t.completed).slice(0, 4).map(t => <div key={t.id} className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50 p-3"><span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-100 text-blue-700">▤</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{t.task}</p><p className="text-xs text-slate-500">{t.subject} · {t.duration} min</p></div></div>)}{!tasks.some(t => !t.completed) && <p className="rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">No pending tasks. Add a task to plan your next session.</p>}</section><section className={card}><SectionTitle eyebrow="LEARN FROM ERRORS" title="Topics to revisit" description="Mistake DNA helps turn errors into a revision plan." action={<button onClick={() => setActive('mistakes')} className="text-sm font-bold text-blue-700">Review →</button>} />{mistakes.slice(0, 4).map(m => <div key={m.id} className="mb-2 flex items-start gap-3 rounded-xl bg-amber-50/70 p-3"><span>◈</span><div><p className="text-sm font-bold">{m.topic}</p><p className="text-xs text-slate-600">{m.question}</p></div></div>)}{!mistakes.length && <p className="rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">No mistakes tracked yet. Record one after your next practice session.</p>}</section></div>
+        <div className="mt-6 grid gap-6 xl:grid-cols-2"><section className={card}><SectionTitle eyebrow="NEXT ACTION" title="Today's study plan" description="Keep the next step small and achievable." action={<button onClick={() => setActive('planner')} className="text-sm font-bold text-blue-700">Open planner →</button>} />
+          {tasks.filter(t => !t.completed).slice(0, 4).map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActive('planner')}
+              className="mb-2 flex w-full items-center gap-3 rounded-xl bg-slate-50 p-3 text-left transition hover:bg-blue-50 hover:shadow-sm cursor-pointer"
+            >
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-100 text-blue-700">
+                ▤
+              </span>
+
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-bold">{t.task}</p>
+                <p className="text-xs text-slate-500">
+                  {t.subject} · {t.duration} min
+                </p>
+              </div>
+
+              <span className="text-blue-600">→</span>
+            </button>
+          ))}
+          {!tasks.some(t => !t.completed) && <p className="rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">No pending tasks. Add a task to plan your next session.</p>}</section><section className={card}><SectionTitle eyebrow="LEARN FROM ERRORS" title="Topics to revisit" description="Mistake DNA helps turn errors into a revision plan." action={<button onClick={() => setActive('mistakes')} className="text-sm font-bold text-blue-700">Review →</button>} />{mistakes.slice(0, 4).map(m => <div key={m.id} className="mb-2 flex items-start gap-3 rounded-xl bg-amber-50/70 p-3"><span>◈</span><div><p className="text-sm font-bold">{m.topic}</p><p className="text-xs text-slate-600">{m.question}</p></div></div>)}{!mistakes.length && <p className="rounded-xl border border-dashed border-slate-200 p-5 text-sm text-slate-500">No mistakes tracked yet. Record one after your next practice session.</p>}</section></div>
 
       </>}
 
